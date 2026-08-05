@@ -1,0 +1,308 @@
+services:
+  # MySQL cho Hive Metastore
+  mysql:
+    image: mysql:5.7
+    container_name: lakehouse-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: hive_metastore
+      MYSQL_USER: hive
+      MYSQL_PASSWORD: hivepassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./config/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Postgres cho Airflow metadata
+  airflow-postgres:
+    image: postgres:15
+    container_name: lakehouse-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # HDFS NameNode (Master)
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: lakehouse-namenode
+    hostname: namenode
+    ports:
+      - "9870:9870"  # NameNode Web UI
+      - "8020:8020"  # HDFS port
+    environment:
+      - CLUSTER_NAME=lakehouse
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+    networks:
+      - lakehouse-net
+
+  # HDFS DataNode (Slave)
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: lakehouse-datanode
+    hostname: datanode
+    ports:
+      - "9864:9864"  # DataNode Web UI
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - lakehouse-net
+
+  # Hive Metastore
+  hive-metastore:
+    image: apache/hive:3.1.3
+    container_name: lakehouse-hive-metastore
+    hostname: hive-metastore
+    environment:
+      - SERVICE_NAME=metastore
+      - DB_DRIVER=mysql
+      - IS_RESUME=true
+    env_file:
+      - ./config/hive.env
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./config/hive-site.xml:/opt/hive/conf/hive-site.xml
+      - ./drivers/mysql-connector-j-8.0.33.jar:/opt/hive/lib/mysql-connector-j-8.0.33.jar
+    depends_on:
+      mysql:
+        condition: service_healthy
+      namenode:
+        condition: service_started
+    networks:
+      - lakehouse-net
+
+  # Spark Master
+  spark-master:
+    image: apache/spark:3.4.0-scala2.12-java11-python3-ubuntu
+    container_name: lakehouse-spark-master
+    hostname: spark-master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./data:/opt/project/data
+      - ./scripts:/opt/project/scripts
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml
+      - ./drivers/delta-core_2.12-2.4.0.jar:/opt/spark/jars/delta-core_2.12-2.4.0.jar
+      - ./drivers/delta-storage-2.4.0.jar:/opt/spark/jars/delta-storage-2.4.0.jar
+      - ./drivers/mysql-connector-j-8.0.33.jar:/opt/spark/jars/mysql-connector-j-8.0.33.jar
+      - spark_logs:/opt/spark/logs
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    depends_on:
+      - namenode
+      - hive-metastore
+    networks:
+      - lakehouse-net
+
+  # Spark Worker
+  spark-worker:
+    image: apache/spark:3.4.0-scala2.12-java11-python3-ubuntu
+    container_name: lakehouse-spark-worker
+    hostname: spark-worker
+    user: root
+    environment:
+      - SPARK_WORKER_CORES=4
+      - SPARK_WORKER_MEMORY=4g
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/opt/project/data
+      - ./scripts:/opt/project/scripts
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml
+      - ./drivers/delta-core_2.12-2.4.0.jar:/opt/spark/jars/delta-core_2.12-2.4.0.jar
+      - ./drivers/delta-storage-2.4.0.jar:/opt/spark/jars/delta-storage-2.4.0.jar
+      - spark_logs:/opt/spark/logs
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--webui-port", "8081", "spark://spark-master:7077"]
+    depends_on:
+      - spark-master
+    networks:
+      - lakehouse-net
+
+  # Spark Thrift Server
+  spark-thrift-server:
+    image: apache/spark:3.4.0-scala2.12-java11-python3-ubuntu
+    container_name: lakehouse-spark-thrift-server
+    hostname: spark-thrift-server
+    user: root
+    ports:
+      - "10000:10000"
+      - "4040:4040"
+    volumes:
+      - ./data:/opt/project/data
+      - ./scripts:/opt/project/scripts
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml
+      - ./drivers/delta-core_2.12-2.4.0.jar:/opt/spark/jars/delta-core_2.12-2.4.0.jar
+      - ./drivers/delta-storage-2.4.0.jar:/opt/spark/jars/delta-storage-2.4.0.jar
+      - ./drivers/mysql-connector-j-8.0.33.jar:/opt/spark/jars/mysql-connector-j-8.0.33.jar
+    command: >
+      bash -c "/opt/spark/sbin/start-thriftserver.sh \
+      --master spark://spark-master:7077 \
+      --driver-memory 512m \
+      --conf spark.cores.max=2 \
+      --conf spark.executor.instances=1 \
+      --conf spark.executor.cores=1 \
+      --conf spark.executor.memory=512m \
+      --hiveconf hive.server2.thrift.bind.host=0.0.0.0 \
+      --hiveconf hive.server2.thrift.port=10000 \
+      && tail -f /dev/null"
+    depends_on:
+      - spark-master
+      - hive-metastore
+    networks:
+      - lakehouse-net
+
+  # Apache Superset
+  superset:
+    image: apache/superset:2.1.0
+    container_name: lakehouse-superset
+    hostname: superset
+    ports:
+      - "8088:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=your-secret-key-here
+    volumes:
+      - superset_data:/app/superset_home
+      - ./config/superset_config.py:/app/pythonpath/superset_config.py
+    depends_on:
+      - spark-thrift-server
+    networks:
+      - lakehouse-net
+    command: >
+      bash -c "
+        superset db upgrade &&
+        superset fab create-admin --username admin --firstname Admin --lastname User --email admin@lakehouse.com --password admin || true &&
+        superset init &&
+        superset run -h 0.0.0.0 -p 8088
+      "
+
+  # Airflow init
+  airflow-init:
+    build:
+      context: ./airflow
+    image: lakehouse-airflow:local
+    container_name: lakehouse-airflow-init
+    user: "50000:0"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      AIRFLOW_UID: 50000
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./scripts:/opt/project/scripts
+      - ./data:/opt/project/data
+      - ./drivers:/opt/project/drivers
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    networks:
+      - lakehouse-net
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@lakehouse.com || true
+      "
+
+  # Airflow Webserver
+  airflow-webserver:
+    build:
+      context: ./airflow
+    image: lakehouse-airflow:local
+    container_name: lakehouse-airflow-webserver
+    restart: unless-stopped
+    user: "50000:0"
+    ports:
+      - "8089:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      AIRFLOW_UID: 50000
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./scripts:/opt/project/scripts
+      - ./data:/opt/project/data
+      - ./drivers:/opt/project/drivers
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    networks:
+      - lakehouse-net
+    command: webserver
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build:
+      context: ./airflow
+    image: lakehouse-airflow:local
+    container_name: lakehouse-airflow-scheduler
+    restart: unless-stopped
+    user: "50000:0"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      AIRFLOW_UID: 50000
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./scripts:/opt/project/scripts
+      - ./data:/opt/project/data
+      - ./drivers:/opt/project/drivers
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    networks:
+      - lakehouse-net
+    command: scheduler
+
+volumes:
+  mysql_data:
+  airflow_postgres_data:
+  namenode_data:
+  datanode_data:
+  spark_logs:
+  superset_data:
+
+networks:
+  lakehouse-net:
+    driver: bridge

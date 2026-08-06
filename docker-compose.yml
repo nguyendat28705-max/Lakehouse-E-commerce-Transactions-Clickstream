@@ -101,6 +101,8 @@ services:
     image: apache/spark:3.4.0-scala2.12-java11-python3-ubuntu
     container_name: lakehouse-spark-master
     hostname: spark-master
+    environment:
+      - PYTHONPATH=/opt/project/scripts
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -129,6 +131,7 @@ services:
     environment:
       - SPARK_WORKER_CORES=4
       - SPARK_WORKER_MEMORY=4g
+      - PYTHONPATH=/opt/project/scripts
     ports:
       - "8081:8081"
     volumes:
@@ -151,6 +154,8 @@ services:
     container_name: lakehouse-spark-thrift-server
     hostname: spark-thrift-server
     user: root
+    environment:
+      - PYTHONPATH=/opt/project/scripts
     ports:
       - "10000:10000"
       - "4040:4040"
@@ -217,6 +222,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_UID: 50000
+      PYTHONPATH: /opt/project/scripts
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -252,6 +258,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_UID: 50000
+      PYTHONPATH: /opt/project/scripts
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -281,6 +288,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_UID: 50000
+      PYTHONPATH: /opt/project/scripts
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs

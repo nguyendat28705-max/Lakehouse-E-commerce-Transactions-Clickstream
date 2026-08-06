@@ -9,3 +9,4 @@ drivers/*.jar
 logs/*
 !logs/.gitkeep
 *.pyc
+__pycache__/

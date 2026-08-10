@@ -223,10 +223,12 @@ services:
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_UID: 50000
       PYTHONPATH: /opt/project/scripts
+      SPARK_CONF_DIR: /opt/project/config
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./config:/opt/project/config
       - ./scripts:/opt/project/scripts
       - ./data:/opt/project/data
       - ./drivers:/opt/project/drivers
@@ -259,10 +261,12 @@ services:
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_UID: 50000
       PYTHONPATH: /opt/project/scripts
+      SPARK_CONF_DIR: /opt/project/config
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./config:/opt/project/config
       - ./scripts:/opt/project/scripts
       - ./data:/opt/project/data
       - ./drivers:/opt/project/drivers
@@ -289,10 +293,12 @@ services:
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_UID: 50000
       PYTHONPATH: /opt/project/scripts
+      SPARK_CONF_DIR: /opt/project/config
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      - ./config:/opt/project/config
       - ./scripts:/opt/project/scripts
       - ./data:/opt/project/data
       - ./drivers:/opt/project/drivers

@@ -23,6 +23,8 @@ BRONZE_DATASETS = [
     ("sessions.csv", "sessions"),
 ]
 
+SILVER_DATASETS = [dataset_name for _, dataset_name in BRONZE_DATASETS]
+
 SPARK_SUBMIT_BASE = " ".join([
     "spark-submit",
     "--master spark://spark-master:7077",
@@ -69,6 +71,21 @@ with DAG (
                 do_xcom_push=False,
             )
 
+    with TaskGroup(group_id="silver_cleaning") as silver_cleaning:
+        for dataset_name in SILVER_DATASETS:
+            BashOperator(
+                task_id=f"clean_{dataset_name}",
+                bash_command=(
+                    f"{SPARK_SUBMIT_BASE} "
+                    f"--name silver_cleaning_{dataset_name} "
+                    "/opt/project/scripts/silver/clean_silver.py "
+                    "{{ ds }} "
+                    f"{dataset_name}"
+                ),
+                execution_timeout=timedelta(minutes=45),
+                do_xcom_push=False,
+            )
+
     end = EmptyOperator(task_id="end")
 
-    start >> bronze_ingestion >> end
+    start >> bronze_ingestion >> silver_cleaning >> end

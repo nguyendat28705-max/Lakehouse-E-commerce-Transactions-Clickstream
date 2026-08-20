@@ -74,9 +74,8 @@ def clean_silver(process_date: str, dataset_name: str) -> None:
     try:
         key_cols = DATASET_KEYS[dataset_name]
         cleaner = DATASET_CLEANERS[dataset_name]
-        bronze_ingest_date_filter = None if dataset_name in FULL_REBUILD_OVERWRITE_DATASETS else process_date
 
-        df = read_bronze(spark, dataset_name, bronze_ingest_date_filter)
+        df = read_bronze(spark, dataset_name, process_date)
         df = filter_valid_record(df)
         df = cleaner(df, process_date)
         df = deduplicate(df, key_cols, DATASET_PRIORITY_COLS.get(dataset_name))

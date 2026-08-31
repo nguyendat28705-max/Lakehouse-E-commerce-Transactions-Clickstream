@@ -48,14 +48,14 @@ DATASET_PRIORITY_COLS = {
 FULL_REBUILD_OVERWRITE_DATASETS = {"customers", "products"}
 
 
-def validate_process_date(process_date: str) -> str:
+def _validate_process_date(process_date: str) -> str:
     try:
         return datetime.strptime(process_date, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError as exc:
         raise ValueError("process_date must use YYYY-MM-DD format") from exc
 
 
-def validate_dataset_name(dataset_name: str) -> str:
+def _validate_dataset_name(dataset_name: str) -> str:
     if dataset_name not in DATASET_CLEANERS:
         supported = ", ".join(sorted(DATASET_CLEANERS))
         raise ValueError(f"Unsupported dataset_name: {dataset_name}. Supported datasets: {supported}")
@@ -63,8 +63,8 @@ def validate_dataset_name(dataset_name: str) -> str:
 
 
 def clean_silver(process_date: str, dataset_name: str) -> None:
-    process_date = validate_process_date(process_date)
-    dataset_name = validate_dataset_name(dataset_name)
+    process_date = _validate_process_date(process_date)
+    dataset_name = _validate_dataset_name(dataset_name)
 
     logger.info("Starting Silver cleaning: dataset=%s, process_date=%s", dataset_name, process_date)
     spark = create_spark_session(f"silver_{dataset_name}")

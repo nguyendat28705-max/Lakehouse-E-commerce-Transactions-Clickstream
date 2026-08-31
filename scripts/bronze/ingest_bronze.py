@@ -21,14 +21,14 @@ CSV_INPUT_BASE = "file:///opt/project/data/raw"
 HDFS_OUTPUT_BASE = "hdfs://namenode:8020/lakehouse/bronze"
 
 
-def validate_ingest_date(ingest_date: str) -> str:
+def _validate_ingest_date(ingest_date: str) -> str:
     try:
         return datetime.strptime(ingest_date, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError as exc:
         raise ValueError("ingest_date must use YYYY-MM-DD format") from exc
 
 
-def validate_file_name(file_name: str) -> str:
+def _validate_file_name(file_name: str) -> str:
     if not file_name or "/" in file_name or "\\" in file_name or file_name in {".", ".."}:
         raise ValueError("file_name must be a CSV file name, not a path")
     if not file_name.endswith(".csv"):
@@ -36,11 +36,11 @@ def validate_file_name(file_name: str) -> str:
     return file_name
 
 
-def build_csv_path(input_base: str, file_name: str) -> str:
-    return f"{input_base.rstrip('/')}/{validate_file_name(file_name)}"
+def _build_csv_path(input_base: str, file_name: str) -> str:
+    return f"{input_base.rstrip('/')}/{_validate_file_name(file_name)}"
 
 
-def validate_local_input_exists(csv_path: str) -> None:
+def _validate_local_input_exists(csv_path: str) -> None:
     parsed = urlparse(csv_path)
     if parsed.scheme != "file":
         return
@@ -50,9 +50,12 @@ def validate_local_input_exists(csv_path: str) -> None:
         raise FileNotFoundError(f"Input CSV does not exist: {csv_path}")
 
 
-def ingest_to_bronze(csv_path: str, hdfs_output_path: str, ingest_date: str, dataset_name: str):
-    ingest_date = validate_ingest_date(ingest_date)
-    validate_local_input_exists(csv_path)
+def ingest_to_bronze(ingest_date: str, file_name: str, dataset_name: str | None = None):
+    ingest_date = _validate_ingest_date(ingest_date)
+    file_name = _validate_file_name(file_name)
+    dataset_name = dataset_name or file_name.replace(".csv", "")
+    csv_path = _build_csv_path(CSV_INPUT_BASE, file_name)
+    _validate_local_input_exists(csv_path)
 
     logger.info(
         "Starting bronze ingestion: dataset=%s, csv_path=%s, ingest_date=%s",
@@ -89,7 +92,7 @@ def ingest_to_bronze(csv_path: str, hdfs_output_path: str, ingest_date: str, dat
             .withColumn("ingestion_timestamp", current_timestamp()) \
             .withColumn("source_file", input_file_name())
 
-        out_full_path = f"{hdfs_output_path}/{dataset_name}"
+        out_full_path = f"{HDFS_OUTPUT_BASE}/{dataset_name}"
         replace_where = f"ingest_date = '{ingest_date}'"
         logger.info(
             "Writing Delta table partition: dataset=%s, output_path=%s, replace_where=%s",
@@ -112,7 +115,7 @@ def ingest_to_bronze(csv_path: str, hdfs_output_path: str, ingest_date: str, dat
             "Bronze ingestion failed: dataset=%s, csv_path=%s, output_path=%s",
             dataset_name,
             csv_path,
-            hdfs_output_path,
+            HDFS_OUTPUT_BASE
         )
         raise
     finally:
@@ -131,18 +134,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    ingest_date = validate_ingest_date(args.ingest_date)
-    file_name = validate_file_name(args.file_name)
-    dataset_name = args.dataset_name or file_name.replace(".csv", "")
-
-    csv_input_path = build_csv_path(CSV_INPUT_BASE, file_name)
-
-    ingest_to_bronze(
-        csv_path=csv_input_path,
-        hdfs_output_path=HDFS_OUTPUT_BASE,
-        ingest_date=ingest_date,
-        dataset_name=dataset_name,
-    )
+    ingest_to_bronze(args.ingest_date, args.file_name, args.dataset_name)
 
 if __name__ == "__main__":
     main()

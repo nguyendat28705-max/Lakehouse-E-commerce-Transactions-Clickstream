@@ -40,6 +40,10 @@ SPARK_SUBMIT_BASE = " ".join([
     "--conf spark.delta.logStore.class=org.apache.spark.sql.delta.storage.HDFSLogStore",
 ])
 
+STATIC_DIMENSION = ["dim_country", "dim_source", "dim_device", "dim_category", "dim_payment_method", "dim_date"]
+SCD2_DIMENSION = ["dim_product", "dim_customer"]
+FACT = ["fact_session", "fact_web_event", "fact_order", "fact_order_item", "fact_review", "fact_customer_funnel"]
+
 
 with DAG (
     dag_id="medallion_pipeline_dag",
@@ -85,7 +89,72 @@ with DAG (
                 execution_timeout=timedelta(minutes=45),
                 do_xcom_push=False,
             )
+    
+    with TaskGroup(group_id="gold_building") as gold_building:
+        with TaskGroup(group_id="static_dimension") as static_dimension:
+            static_tasks = {}
+            
+            for table_name in STATIC_DIMENSION:
+                static_tasks[table_name] = BashOperator(
+                    task_id=f"build_{table_name}",
+                    bash_command=(
+                        f"{SPARK_SUBMIT_BASE} "
+                        f"--name gold_building_{table_name} "
+                        "/opt/project/scripts/gold/build_gold.py "
+                        "{{ ds }} "
+                        f"{table_name}"
+                    ),
+                    execution_timeout=timedelta(minutes=45),
+                    do_xcom_push=False
+                )
+            
+        with TaskGroup(group_id="scd2_dimension") as scd2_dimension:
+            scd2_tasks = {}
+            
+            for table_name in SCD2_DIMENSION:
+                scd2_tasks[table_name] = BashOperator(
+                    task_id=f"build_{table_name}",
+                    bash_command=(
+                        f"{SPARK_SUBMIT_BASE} "
+                        f"--name gold_building_{table_name} "
+                        "/opt/project/scripts/gold/build_gold.py "
+                        "{{ ds }} "
+                        f"{table_name}"
+                    ),
+                    execution_timeout=timedelta(minutes=45),
+                    do_xcom_push=False
+                )
+                
+        with TaskGroup(group_id="fact") as fact:
+            for table_name in FACT:
+                BashOperator(
+                    task_id=f"build_{table_name}",
+                    bash_command=(
+                        f"{SPARK_SUBMIT_BASE} "
+                        f"--name gold_building_{table_name} "
+                        "/opt/project/scripts/gold/build_gold.py "
+                        "{{ ds }} "
+                        f"{table_name}"
+                    ),
+                    execution_timeout=timedelta(minutes=45),
+                    do_xcom_push=False
+                )
+                
+        update_gold_watermark = BashOperator(
+            task_id="update_gold_watermark",
+            bash_command=(
+                f"{SPARK_SUBMIT_BASE} "
+                "/opt/project/scripts/gold/build_gold.py "
+                "{{ ds }} "
+                "update_watermark "
+            ),
+            execution_timeout=timedelta(minutes=45),
+            do_xcom_push=False
+        )
+        
+        static_dimension >> scd2_dimension >> fact >> update_gold_watermark
+            
 
     end = EmptyOperator(task_id="end")
 
-    start >> bronze_ingestion >> silver_cleaning >> end
+    start >> bronze_ingestion >> silver_cleaning >> gold_building >> end
